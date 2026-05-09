@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mini CDA No.01 — HiveMQ Edition</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Kanit:wght@300;400;600&display=swap" rel="stylesheet">
+
+<!-- MQTT.js via CDN (WebSocket support) -->
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<!-- Chart.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+
+<style>
+:root {
+  --bg:        #080c18;
+  --bg2:       #0c1220;
+  --panel:     #0f1828;
+  --border:    #1a2840;
+  --border2:   #223050;
+  --cyan:      #00d4ff;
+  --green:     #00e89a;
+  --yellow:    #f5c400;
+  --red:       #ff3860;
+  --orange:    #ff7a00;
+  --text:      #b8cce4;
+  --text2:     #6a8aaa;
+  --muted:     #344860;
+  --font-mono: 'Share Tech Mono', monospace;
+  --font-ui:   'Kanit', sans-serif;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background:var(--bg); color:var(--text);
+  font-family:var(--font-ui); min-height:100vh; overflow-x:hidden;
+}
+body::after {
+  content:''; position:fixed; inset:0;
+  background-image:
+    linear-gradient(rgba(0,212,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,212,255,0.018) 1px, transparent 1px);
+  background-size:40px 40px;
+  pointer-events:none; z-index:0;
+}
+
+/* ── LOGIN ── */
+#login-page {
+  position:fixed; inset:0;
+  display:flex; align-items:center; justify-content:center;
+  z-index:500; background:var(--bg);
+}
+.login-wrap { width:min(420px,95vw); position:relative; z-index:1; }
+.login-logo { text-align:center; margin-bottom:32px; }
+.login-icon {
+  width:64px; height:64px; border:2px solid var(--cyan); border-radius:14px;
+  display:inline-flex; align-items:center; justify-content:center; font-size:30px;
+  box-shadow:0 0 30px rgba(0,212,255,0.3), inset 0 0 20px rgba(0,212,255,0.05);
+  animation:pulse-icon 3s ease-in-out infinite; margin-bottom:16px;
+}
+@keyframes pulse-icon {
+  0%,100%{ box-shadow:0 0 20px rgba(0,212,255,0.2),inset 0 0 10px rgba(0,212,255,0.05); }
+  50%    { box-shadow:0 0 45px rgba(0,212,255,0.5),inset 0 0 20px rgba(0,212,255,0.1); }
+}
+.login-title { font-size:25px; font-weight:600; color:var(--cyan); letter-spacing:2px; }
+.login-sub   { font-size:20px; color:var(--text2); font-family:var(--font-mono); margin-top:5px; letter-spacing:1px; }
+.login-badge {
+  display:inline-flex; align-items:center; gap:6px;
+  margin-top:10px; padding:4px 12px;
+  background:rgba(0,212,255,0.07); border:1px solid rgba(0,212,255,0.2);
+  border-radius:20px; font-size:15px; font-family:var(--font-mono); color:var(--text2);
+}
+.login-badge span { width:6px; height:6px; border-radius:50%; background:var(--green); animation:blink-dot 2s infinite; }
+
+.login-box {
+  background:var(--panel); border:1px solid var(--border2);
+  border-radius:16px; padding:32px;
+  box-shadow:0 24px 64px rgba(0,0,0,0.5);
+}
+.lf { margin-bottom:18px; }
+.lf label {
+  display:block; font-size:15px; font-family:var(--font-mono);
+  color:var(--text2); letter-spacing:2px; text-transform:uppercase; margin-bottom:7px;
+}
+.lf input {
+  width:100%; background:var(--bg2); border:1px solid var(--border2);
+  border-radius:8px; padding:11px 14px; color:var(--text);
+  font-family:var(--font-mono); font-size:16px; outline:none; transition:.25s;
+}
+.lf input:focus { border-color:var(--cyan); box-shadow:0 0 0 3px rgba(0,212,255,0.1); }
+.lf input::placeholder { color:var(--muted); }
+
+.login-btn {
+  width:100%; margin-top:6px; padding:13px;
+  background:linear-gradient(135deg,rgba(0,212,255,0.15),rgba(0,212,255,0.05));
+  border:1px solid var(--cyan); border-radius:8px; color:var(--cyan);
+  font-family:var(--font-mono); font-size:14px; font-weight:600;
+  letter-spacing:2px; cursor:pointer; transition:.25s;
+}
+.login-btn:hover { background:rgba(0,212,255,0.22); box-shadow:0 0 24px rgba(0,212,255,0.3); }
+.login-btn:active { transform:scale(0.98); }
+.login-btn:disabled { opacity:.5; cursor:not-allowed; }
+
+#login-error {
+  margin-top:14px; padding:10px 14px;
+  background:rgba(255,56,96,0.1); border:1px solid rgba(255,56,96,0.3);
+  border-radius:6px; color:var(--red);
+  font-family:var(--font-mono); font-size:12px; display:none;
+}
+.login-loading {
+  display:none; text-align:center; margin-top:14px;
+  font-family:var(--font-mono); font-size:12px; color:var(--text2);
+  animation:blink-t 1s ease-in-out infinite;
+}
+@keyframes blink-t { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* remember me row */
+.remember-row {
+  display:flex; align-items:center; gap:10px; margin-bottom:18px;
+  cursor:pointer; user-select:none;
+}
+.remember-row input[type=checkbox] { display:none; }
+.chk-box {
+  width:18px; height:18px; border:1.5px solid var(--border2); border-radius:4px;
+  background:var(--bg2); flex-shrink:0; display:flex; align-items:center; justify-content:center;
+  transition:.2s; font-size:11px; color:transparent;
+}
+.remember-row input:checked + .chk-box {
+  border-color:var(--cyan); background:rgba(0,212,255,0.12); color:var(--cyan);
+}
+.remember-row:hover .chk-box { border-color:var(--cyan); }
+.chk-label { font-size:11px; font-family:var(--font-mono); color:var(--text2); letter-spacing:1px; }
+
+/* saved user chips */
+.saved-users { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px; }
+.saved-chip {
+  display:flex; align-items:center; gap:5px;
+  padding:4px 10px; border:1px solid var(--border2); border-radius:20px;
+  background:var(--bg2); font-family:var(--font-mono); font-size:11px; color:var(--text2);
+  cursor:pointer; transition:.2s;
+}
+.saved-chip:hover { border-color:var(--cyan); color:var(--cyan); }
+.saved-chip .chip-del {
+  font-size:13px; color:var(--muted); line-height:1;
+  padding:0 2px; transition:.2s;
+}
+.saved-chip .chip-del:hover { color:var(--red); }
+
+/* ── DASHBOARD ── */
+#dashboard-page { display:none; position:relative; z-index:1; }
+
+header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:13px 24px; border-bottom:1px solid var(--border);
+  background:linear-gradient(90deg,var(--bg2),var(--bg));
+  position:sticky; top:0; z-index:100; backdrop-filter:blur(12px);
+}
+.logo { display:flex; align-items:center; gap:12px; }
+.logo-icon {
+  width:34px; height:34px; border:1.5px solid var(--cyan); border-radius:7px;
+  display:flex; align-items:center; justify-content:center; font-size:16px;
+  box-shadow:0 0 10px rgba(0,212,255,0.3); animation:pulse-icon 3s ease-in-out infinite;
+}
+.logo-text { font-size:16px; font-weight:600; color:var(--cyan); letter-spacing:1px; }
+.logo-sub  { font-size:20px; color:var(--text2); font-family:var(--font-mono); }
+
+.header-right { display:flex; align-items:center; gap:14px; }
+#logout-btn {
+  font-size:10px; font-family:var(--font-mono); color:var(--text2);
+  background:transparent; border:1px solid var(--border2);
+  border-radius:4px; padding:4px 10px; cursor:pointer; transition:.2s; letter-spacing:1px;
+}
+#logout-btn:hover { border-color:var(--red); color:var(--red); }
+
+/* MQTT connection status badge in header */
+#mqtt-badge {
+  display:flex; align-items:center; gap:5px;
+  padding:3px 9px; border-radius:12px;
+  font-size:9px; font-family:var(--font-mono); letter-spacing:1px;
+  border:1px solid var(--border2); color:var(--text2); background:transparent;
+  transition:.3s;
+}
+#mqtt-badge.connected { border-color:rgba(0,232,154,0.4); color:var(--green); background:rgba(0,232,154,0.07); }
+#mqtt-badge.error     { border-color:rgba(255,56,96,0.4);  color:var(--red);   background:rgba(255,56,96,0.07); }
+#mqtt-badge-dot { width:5px; height:5px; border-radius:50%; background:currentColor; }
+#mqtt-badge.connected #mqtt-badge-dot { animation:blink-dot 2s infinite; }
+
+#wifi-bars { display:flex; align-items:flex-end; gap:2px; height:16px; }
+.bar { width:4px; background:var(--muted); border-radius:1px; transition:background .4s; }
+.bar:nth-child(1){height:4px;} .bar:nth-child(2){height:8px;}
+.bar:nth-child(3){height:12px;} .bar:nth-child(4){height:16px;}
+
+.hdr-st { text-align:right; }
+#status-text { font-size:11px; font-family:var(--font-mono); color:var(--text2); }
+#last-update { font-size:10px; font-family:var(--font-mono); color:var(--muted); }
+
+#status-dot {
+  width:9px; height:9px; border-radius:50%; flex-shrink:0;
+  background:var(--muted); box-shadow:0 0 0 3px rgba(52,72,96,0.3); transition:all .4s;
+}
+#status-dot.online {
+  background:var(--green);
+  box-shadow:0 0 0 3px rgba(0,232,154,0.2),0 0 10px var(--green);
+  animation:blink-dot 2s ease-in-out infinite;
+}
+@keyframes blink-dot { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+main { padding:20px; max-width:1400px; margin:0 auto; }
+
+/* Refrigerant bar */
+.ref-bar {
+  display:flex; gap:8px; flex-wrap:wrap; align-items:center;
+  padding:12px 16px; background:var(--panel);
+  border:1px solid var(--border); border-radius:10px; margin-bottom:18px;
+}
+.ref-label { font-size:10px; color:var(--text2); font-family:var(--font-mono); letter-spacing:1.5px; margin-right:4px; flex-shrink:0; }
+.ref-btn {
+  padding:5px 13px; border:1px solid var(--border2); border-radius:20px;
+  background:transparent; color:var(--text2);
+  font-family:var(--font-mono); font-size:12px; cursor:pointer; transition:.2s;
+}
+.ref-btn:hover { border-color:var(--cyan); color:var(--cyan); }
+.ref-btn.active {
+  background:rgba(0,212,255,0.12); border-color:var(--cyan); color:var(--cyan);
+  box-shadow:0 0 10px rgba(0,212,255,0.15);
+}
+
+/* Metric grid */
+.grid-metrics {
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+  gap:12px; margin-bottom:18px;
+}
+.metric-card {
+  background:var(--panel); border:1px solid var(--border);
+  border-radius:12px; padding:16px 18px;
+  position:relative; overflow:hidden; transition:border-color .3s,transform .2s;
+}
+.metric-card:hover { border-color:var(--border2); transform:translateY(-2px); }
+.metric-card::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:2px;
+  background:var(--accent,var(--cyan)); opacity:.85;
+}
+.metric-card::after {
+  content:''; position:absolute; top:-10px; right:-10px;
+  width:80px; height:80px;
+  background:radial-gradient(circle,var(--accent-glow,rgba(0,212,255,0.06)) 0%,transparent 70%);
+}
+.metric-label {
+  font-size:10px; color:var(--text2); font-family:var(--font-mono);
+  letter-spacing:1.5px; text-transform:uppercase; margin-bottom:10px;
+}
+.metric-value {
+  font-size:34px; font-family:var(--font-mono); font-weight:700;
+  color:var(--accent,var(--cyan)); line-height:1;
+  text-shadow:0 0 14px var(--accent-glow,rgba(0,212,255,0.4)); transition:color .3s;
+}
+.metric-unit { font-size:12px; color:var(--text2); font-family:var(--font-mono); margin-top:5px; }
+.metric-sub  { font-size:11px; color:var(--text2); margin-top:6px; font-family:var(--font-mono); }
+
+.badge {
+  display:inline-block; padding:2px 7px; border-radius:10px;
+  font-size:9px; font-family:var(--font-mono); margin-left:4px;
+}
+.badge-ok    { background:rgba(0,232,154,0.1);  color:var(--green);  border:1px solid rgba(0,232,154,0.25); }
+.badge-warn  { background:rgba(245,196,0,0.1);  color:var(--yellow); border:1px solid rgba(245,196,0,0.25); }
+.badge-alarm { background:rgba(255,56,96,0.1);  color:var(--red);    border:1px solid rgba(255,56,96,0.25); }
+
+.card-cyan   { --accent:var(--cyan);   --accent-glow:rgba(0,212,255,0.08); }
+.card-green  { --accent:var(--green);  --accent-glow:rgba(0,232,154,0.08); }
+.card-yellow { --accent:var(--yellow); --accent-glow:rgba(245,196,0,0.08); }
+.card-orange { --accent:var(--orange); --accent-glow:rgba(255,122,0,0.08); }
+.card-red    { --accent:var(--red);    --accent-glow:rgba(255,56,96,0.08); }
+
+/* Charts */
+.grid-charts { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+@media(max-width:768px){ .grid-charts{ grid-template-columns:1fr; } }
+.chart-card {
+  background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px 18px;
+}
+.chart-title {
+  font-size:10px; font-family:var(--font-mono); color:var(--text2);
+  letter-spacing:1.5px; text-transform:uppercase; margin-bottom:12px;
+}
+.chart-wrap { position:relative; height:170px; }
+
+@keyframes flash-update { 0%{opacity:.25} 100%{opacity:1} }
+.flash { animation:flash-update .35s ease-out; }
+
+/* Chart Controls */
+.chart-ctrl {
+  display:flex; flex-wrap:wrap; align-items:center; gap:10px;
+  padding:10px 14px 14px; border-top:1px solid var(--border); margin-top:12px;
+}
+.ctrl-group { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+.ctrl-label { font-size:10px; font-family:var(--font-mono); color:var(--text2); letter-spacing:1.5px; white-space:nowrap; }
+.ctrl-select, .ctrl-input {
+  background:var(--bg); border:1px solid var(--border2);
+  color:var(--text); font-family:var(--font-mono); font-size:12px;
+  border-radius:6px; padding:4px 8px; outline:none; transition:.2s; cursor:pointer;
+}
+.ctrl-select:focus, .ctrl-input:focus { border-color:var(--cyan); box-shadow:0 0 0 2px rgba(0,212,255,0.1); }
+.ctrl-input { width:72px; text-align:center; }
+.ctrl-input::placeholder { color:var(--muted); }
+.ctrl-sep { width:1px; height:20px; background:var(--border); flex-shrink:0; }
+.ctrl-mode-btn {
+  padding:4px 10px; border-radius:5px;
+  border:1px solid var(--border2); background:transparent;
+  color:var(--text2); font-family:var(--font-mono); font-size:11px;
+  cursor:pointer; transition:.2s; letter-spacing:.5px;
+}
+.ctrl-mode-btn.active { background:rgba(0,212,255,0.12); border-color:var(--cyan); color:var(--cyan); }
+.ctrl-mode-btn:hover:not(.active) { border-color:var(--border2); color:var(--text); }
+.manual-range { display:flex; align-items:center; gap:6px; }
+.range-dash { font-family:var(--font-mono); font-size:12px; color:var(--muted); }
+
+@media(max-width:600px){
+  header { padding:10px 14px; }
+  main { padding:12px; }
+  .metric-value { font-size:26px; }
+  .login-box { padding:22px; }
+  .chart-ctrl { gap:8px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════
+     ★ ตั้งค่า HiveMQ ตรงนี้ ★
+     ══════════════════════════════════════════ -->
+<!-- ══════════════════════════════════════════ -->
+
+<!-- LOGIN PAGE -->
+<div id="login-page" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:500;background:var(--bg)">
+  <div class="login-wrap">
+    <div class="login-logo">
+      <div class="login-icon">❄</div>
+      <div class="login-title">Smart AC Monitor No.01</div>
+      <div class="login-sub">By Jeerawat S.</div>
+      <div class="login-badge"><span></span> Refrigeration Monitor System</div>
+    </div>
+    <div class="login-box">
+      <!-- Saved user chips -->
+      <div id="saved-users" class="saved-users" style="display:none"></div>
+
+      <div class="lf">
+        <label>Username</label>
+        <input id="login-user" type="text" placeholder="username"
+               onkeydown="if(event.key==='Enter')document.getElementById('login-pass').focus()" autocomplete="off" />
+      </div>
+      <div class="lf">
+        <label>Password</label>
+        <input id="login-pass" type="password" placeholder="••••••••"
+               onkeydown="if(event.key==='Enter')doLogin()" autocomplete="off" />
+      </div>
+
+      <!-- Remember me -->
+      <label class="remember-row">
+        <input type="checkbox" id="chk-remember">
+        <div class="chk-box">✓</div>
+        <span class="chk-label">Remember Username</span>
+      </label>
+
+      <button class="login-btn" id="login-btn" onclick="doLogin()">▶ SIGN IN</button>
+      <div id="login-error" style="margin-top:14px;padding:10px 14px;background:rgba(255,56,96,0.1);border:1px solid rgba(255,56,96,0.3);border-radius:6px;color:var(--red);font-family:var(--font-mono);font-size:12px;display:none"></div>
+      <div id="login-loading" style="display:none;text-align:center;margin-top:14px;font-family:var(--font-mono);font-size:12px;color:var(--text2)">CONNECTING...</div>
+    </div>
+  </div>
+</div>
+<div id="dashboard-page" style="display:none">
+  <header>
+    <div class="logo">
+      <div class="logo-icon">❄</div>
+      <div>
+        <div class="logo-text">Smart AC Monitor No.01</div>
+        <div class="logo-sub">By Jeerawat S.</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div id="mqtt-badge">
+        <div id="mqtt-badge-dot"></div>
+        <span id="mqtt-badge-text">CONNECTING</span>
+      </div>
+      <div id="wifi-bars">
+        <div class="bar" id="b1"></div><div class="bar" id="b2"></div>
+        <div class="bar" id="b3"></div><div class="bar" id="b4"></div>
+      </div>
+      <div class="hdr-st">
+        <div id="status-text">OFFLINE</div>
+        <div id="last-update">--:--:--</div>
+      </div>
+      <div id="status-dot"></div>
+      <button id="logout-btn" onclick="doLogout()">LOGOUT</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Refrigerant selector -->
+    <div class="ref-bar">
+      <span class="ref-label">Refrigerant Type :</span>
+      <button class="ref-btn active" data-ref="1" onclick="selectRef(this)">R410a</button>
+      <button class="ref-btn" data-ref="2" onclick="selectRef(this)">R404a</button>
+      <button class="ref-btn" data-ref="3" onclick="selectRef(this)">R134a</button>
+      <button class="ref-btn" data-ref="4" onclick="selectRef(this)">R448a</button>
+      <button class="ref-btn" data-ref="5" onclick="selectRef(this)">R290</button>
+      <button class="ref-btn" data-ref="6" onclick="selectRef(this)">R407c</button>
+      <button class="ref-btn" data-ref="7" onclick="selectRef(this)">R32</button>
+      <button class="ref-btn" data-ref="8" onclick="selectRef(this)">R22</button>
+      <button class="ref-btn" data-ref="9" onclick="selectRef(this)">R513a</button>
+    </div>
+
+    <!-- Metrics -->
+    <div class="grid-metrics">
+      <div class="metric-card card-cyan">
+        <div class="metric-label">PD — High Pressure</div>
+        <div class="metric-value" id="val-pd">--.-</div>
+        <div class="metric-unit">MPa</div>
+        <div class="metric-sub">Sat.Temp: <span id="val-ctr">--</span> °C</div>
+      </div>
+      <div class="metric-card card-green">
+        <div class="metric-label">PS — Low Pressure</div>
+        <div class="metric-value" id="val-ps">--.-</div>
+        <div class="metric-unit">MPa</div>
+        <div class="metric-sub">Sat.Temp: <span id="val-etr">--</span> °C</div>
+      </div>
+      <div class="metric-card card-yellow">
+        <div class="metric-label">TD — Discharge Temp</div>
+        <div class="metric-value" id="val-td">--.-</div>
+        <div class="metric-unit">°C</div>
+        <div class="metric-sub">DSH: <span id="val-dsh">--</span> K <span id="badge-dsh" class="badge"></span></div>
+      </div>
+      <div class="metric-card card-orange">
+        <div class="metric-label">TS — Suction Temp</div>
+        <div class="metric-value" id="val-ts">--.-</div>
+        <div class="metric-unit">°C</div>
+        <div class="metric-sub">SSH: <span id="val-ssh">--</span> K <span id="badge-ssh" class="badge"></span></div>
+      </div>
+      <div class="metric-card card-red">
+        <div class="metric-label">TTop — Top Temp</div>
+        <div class="metric-value" id="val-ttop">--.-</div>
+        <div class="metric-unit">°C</div>
+      </div>
+      <div class="metric-card card-cyan">
+        <div class="metric-label">TCond Out</div>
+        <div class="metric-value" id="val-tcond">--.-</div>
+        <div class="metric-unit">°C</div>
+        <div class="metric-sub">Subcool: <span id="val-sub">--</span> K</div>
+      </div>
+      <div class="metric-card card-green">
+        <div class="metric-label">Refrigerant</div>
+        <div class="metric-value" id="val-refname" style="font-size:26px">--</div>
+        <div class="metric-unit">Active</div>
+      </div>
+      <div class="metric-card card-cyan">
+        <div class="metric-label">WiFi RSSI</div>
+        <div class="metric-value" id="val-rssi">--</div>
+        <div class="metric-unit">dBm</div>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="grid-charts">
+
+      <!-- Pressure -->
+      <div class="chart-card">
+        <div class="chart-title">▲ Pressure History — MPa</div>
+        <div class="chart-wrap"><canvas id="chart-pressure"></canvas></div>
+        <div class="chart-ctrl">
+          <div class="ctrl-group">
+            <span class="ctrl-label">POINTS :</span>
+            <select class="ctrl-select" onchange="setPoints('pressure', this.value)">
+              <option value="20">20</option>
+              <option value="30" selected>30</option>
+              <option value="60">60</option>
+              <option value="120">120</option>
+            </select>
+          </div>
+          <div class="ctrl-sep"></div>
+          <div class="ctrl-group">
+            <span class="ctrl-label">Y-AXIS :</span>
+            <button class="ctrl-mode-btn active" onclick="setYMode('pressure','auto',this)">AUTO</button>
+            <button class="ctrl-mode-btn"        onclick="setYMode('pressure','manual',this)">MANUAL</button>
+            <div class="manual-range" id="range-pressure" style="display:none">
+              <input class="ctrl-input" id="pres-min" type="number" step="0.1" placeholder="Min" oninput="applyRange('pressure')">
+              <span class="range-dash">—</span>
+              <input class="ctrl-input" id="pres-max" type="number" step="0.1" placeholder="Max" oninput="applyRange('pressure')">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Temperature -->
+      <div class="chart-card">
+        <div class="chart-title">◉ Temperature History — °C</div>
+        <div class="chart-wrap"><canvas id="chart-temp"></canvas></div>
+        <div class="chart-ctrl">
+          <div class="ctrl-group">
+            <span class="ctrl-label">POINTS :</span>
+            <select class="ctrl-select" onchange="setPoints('temp', this.value)">
+              <option value="20">20</option>
+              <option value="30" selected>30</option>
+              <option value="60">60</option>
+              <option value="120">120</option>
+            </select>
+          </div>
+          <div class="ctrl-sep"></div>
+          <div class="ctrl-group">
+            <span class="ctrl-label">Y-AXIS :</span>
+            <button class="ctrl-mode-btn active" onclick="setYMode('temp','auto',this)">AUTO</button>
+            <button class="ctrl-mode-btn"        onclick="setYMode('temp','manual',this)">MANUAL</button>
+            <div class="manual-range" id="range-temp" style="display:none">
+              <input class="ctrl-input" id="temp-min" type="number" step="1" placeholder="Min" oninput="applyRange('temp')">
+              <span class="range-dash">—</span>
+              <input class="ctrl-input" id="temp-max" type="number" step="1" placeholder="Max" oninput="applyRange('temp')">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DSH / SSH / Subcool -->
+      <div class="chart-card" style="grid-column:1/-1;">
+        <div class="chart-title">◈ Superheat &amp; Subcooling — K</div>
+        <div class="chart-wrap" style="height:190px;"><canvas id="chart-superheat"></canvas></div>
+        <div class="chart-ctrl">
+          <div class="ctrl-group">
+            <span class="ctrl-label">POINTS :</span>
+            <select class="ctrl-select" onchange="setPoints('superheat', this.value)">
+              <option value="20">20</option>
+              <option value="30" selected>30</option>
+              <option value="60">60</option>
+              <option value="120">120</option>
+            </select>
+          </div>
+          <div class="ctrl-sep"></div>
+          <div class="ctrl-group">
+            <span class="ctrl-label">Y-AXIS :</span>
+            <button class="ctrl-mode-btn active" onclick="setYMode('superheat','auto',this)">AUTO</button>
+            <button class="ctrl-mode-btn"        onclick="setYMode('superheat','manual',this)">MANUAL</button>
+            <div class="manual-range" id="range-superheat" style="display:none">
+              <input class="ctrl-input" id="sh-min" type="number" step="1" placeholder="Min" oninput="applyRange('superheat')">
+              <span class="range-dash">—</span>
+              <input class="ctrl-input" id="sh-max" type="number" step="1" placeholder="Max" oninput="applyRange('superheat')">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sat.Temp High / Low -->
+      <div class="chart-card" style="grid-column:1/-1;">
+        <div class="chart-title">◆ Saturation Temperature — °C</div>
+        <div class="chart-wrap" style="height:190px;"><canvas id="chart-sattemp"></canvas></div>
+        <div class="chart-ctrl">
+          <div class="ctrl-group">
+            <span class="ctrl-label">POINTS :</span>
+            <select class="ctrl-select" onchange="setPoints('sattemp', this.value)">
+              <option value="20">20</option>
+              <option value="30" selected>30</option>
+              <option value="60">60</option>
+              <option value="120">120</option>
+            </select>
+          </div>
+          <div class="ctrl-sep"></div>
+          <div class="ctrl-group">
+            <span class="ctrl-label">Y-AXIS :</span>
+            <button class="ctrl-mode-btn active" onclick="setYMode('sattemp','auto',this)">AUTO</button>
+            <button class="ctrl-mode-btn"        onclick="setYMode('sattemp','manual',this)">MANUAL</button>
+            <div class="manual-range" id="range-sattemp" style="display:none">
+              <input class="ctrl-input" id="sat-min" type="number" step="1" placeholder="Min" oninput="applyRange('sattemp')">
+              <span class="range-dash">—</span>
+              <input class="ctrl-input" id="sat-max" type="number" step="1" placeholder="Max" oninput="applyRange('sattemp')">
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<script>
+// ══════════════════════════════════════════
+//  ★ ตั้งค่า HiveMQ ตรงนี้ ★
+// ══════════════════════════════════════════
+const HIVEMQ_HOST    = "565621753b6441fabb16dc5b78b17328.s1.eu.hivemq.cloud"; // ← เปลี่ยนเป็น Host ของคุณ
+const HIVEMQ_WS_PORT = 8884;                           // WSS (TLS WebSocket)
+const MQTT_USER      = "CSD.IOT2";         // ← เปลี่ยน
+const MQTT_PASS_MQTT = "Csd@iot2026";         // ← เปลี่ยน
+
+// ── Login สำหรับหน้าเว็บ เพิ่ม/แก้ user ได้ตรงนี้ ──
+const WEB_USERS = {
+  "Csdiot":    "csd@iot2026"
+};
+
+const TOPIC_SENSORS = "/minicda/sensors";
+const TOPIC_CMD_REF = "/minicda/commands/refrigerant_index";
+
+// ══════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════
+let mqttClient  = null;
+let chartsReady = false;
+let lastData    = null;
+let loggedInUser = null;
+
+// ── Chart data arrays ──
+const chartLabels=[], pdData=[], psData=[], tdData=[], tsData=[];
+const ttopData=[], tcondData=[];
+const dshData=[], sshData=[], subData=[];
+const ctrData=[], etrData=[];
+
+const chartPts = { pressure:30, temp:30, superheat:30, sattemp:30 };
+let pressureChart, tempChart, superheatChart, satTempChart;
+
+// ══════════════════════════════════════════
+//  REMEMBER ME  (localStorage key: "cda_saved_users")
+// ══════════════════════════════════════════
+function getSaved() {
+  try { return JSON.parse(localStorage.getItem('cda_saved_users') || '[]'); } catch{ return []; }
+}
+function saveUser(u) {
+  const list = getSaved().filter(x => x !== u);
+  list.unshift(u);
+  localStorage.setItem('cda_saved_users', JSON.stringify(list.slice(0, 5)));
+}
+function removeUser(u) {
+  localStorage.setItem('cda_saved_users', JSON.stringify(getSaved().filter(x => x !== u)));
+  renderChips();
+}
+function renderChips() {
+  const list = getSaved();
+  const wrap = document.getElementById('saved-users');
+  wrap.innerHTML = '';
+  if (list.length === 0) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'flex';
+  list.forEach(u => {
+    const chip = document.createElement('div');
+    chip.className = 'saved-chip';
+    chip.innerHTML = `<span onclick="fillUser('${u}')">${u}</span><span class="chip-del" onclick="removeUser('${u}')" title="ลบ">×</span>`;
+    wrap.appendChild(chip);
+  });
+}
+function fillUser(u) {
+  document.getElementById('login-user').value = u;
+  document.getElementById('login-pass').focus();
+}
+
+// ══════════════════════════════════════════
+//  LOGIN / LOGOUT
+// ══════════════════════════════════════════
+window.addEventListener('load', () => {
+  renderChips();
+});
+
+function doLogin() {
+  const user   = document.getElementById('login-user').value.trim();
+  const pass   = document.getElementById('login-pass').value;
+  const remember = document.getElementById('chk-remember').checked;
+  const errEl  = document.getElementById('login-error');
+  const loadEl = document.getElementById('login-loading');
+  const btn    = document.getElementById('login-btn');
+
+  errEl.style.display = 'none';
+
+  if (!user || !pass) {
+    errEl.style.display = 'block';
+    errEl.textContent = 'กรุณากรอก Username และ Password';
+    return;
+  }
+  if (WEB_USERS[user] !== pass) {
+    errEl.style.display = 'block';
+    errEl.textContent = 'Username หรือ Password ไม่ถูกต้อง';
+    return;
+  }
+
+  // บันทึก username ถ้าติ๊ก remember
+  if (remember) saveUser(user);
+
+  loggedInUser = user;
+  loadEl.style.display = 'block';
+  btn.disabled = true;
+
+  document.getElementById('login-page').style.display     = 'none';
+  document.getElementById('dashboard-page').style.display = 'block';
+
+  if (!chartsReady) { initCharts(); chartsReady = true; }
+  connectMQTT();
+
+  loadEl.style.display = 'none';
+  btn.disabled = false;
+}
+
+function doLogout() {
+  loggedInUser = null;
+  if (mqttClient) { mqttClient.end(true); mqttClient = null; }
+  document.getElementById('dashboard-page').style.display = 'none';
+  document.getElementById('login-page').style.display     = 'flex';
+  document.getElementById('login-pass').value = '';
+  document.getElementById('status-dot').classList.remove('online');
+  document.getElementById('status-text').textContent = 'OFFLINE';
+  setMqttBadge('disconnected');
+  renderChips();
+}
+
+// ══════════════════════════════════════════
+//  MQTT
+// ══════════════════════════════════════════
+function connectMQTT() {
+  setMqttBadge('connecting');
+
+  const brokerUrl = `wss://${HIVEMQ_HOST}:${HIVEMQ_WS_PORT}/mqtt`;
+  const clientId  = 'WebClient_' + Math.random().toString(16).slice(2, 8);
+
+  mqttClient = mqtt.connect(brokerUrl, {
+    clientId:  clientId,
+    username:  MQTT_USER,
+    password:  MQTT_PASS_MQTT,
+    clean:     true,
+    reconnectPeriod: 3000,
+    connectTimeout:  10000,
+  });
+
+  mqttClient.on('connect', () => {
+    console.log('MQTT connected');
+    setMqttBadge('connected');
+
+    // Subscribe topics
+    mqttClient.subscribe(TOPIC_SENSORS,  { qos:0 }, err => { if(err) console.warn('sub sensors err', err); });
+    mqttClient.subscribe(TOPIC_CMD_REF,  { qos:0 }, err => { if(err) console.warn('sub cmd err', err); });
+  });
+
+  mqttClient.on('message', (topic, payload) => {
+    const msg = payload.toString();
+    try {
+      if (topic === TOPIC_SENSORS) {
+        const d = JSON.parse(msg);
+        updateDashboard(d);
+      } else if (topic === TOPIC_CMD_REF) {
+        const v = parseInt(msg);
+        if (v >= 1 && v <= 9) {
+          document.querySelectorAll('.ref-btn').forEach(b =>
+            b.classList.toggle('active', parseInt(b.dataset.ref) === v));
+        }
+      }
+    } catch(e) {
+      console.warn('MQTT parse error:', e);
+    }
+  });
+
+  mqttClient.on('reconnect', () => {
+    console.log('MQTT reconnecting...');
+    setMqttBadge('connecting');
+  });
+
+  mqttClient.on('error', err => {
+    console.error('MQTT error:', err);
+    setMqttBadge('error');
+  });
+
+  mqttClient.on('close', () => {
+    console.log('MQTT disconnected');
+    if (loggedInUser) setMqttBadge('connecting');  // จะ reconnect อัตโนมัติ
+    document.getElementById('status-dot').classList.remove('online');
+    document.getElementById('status-text').textContent = 'OFFLINE';
+  });
+}
+
+function setMqttBadge(state) {
+  const badge   = document.getElementById('mqtt-badge');
+  const badgeTxt = document.getElementById('mqtt-badge-text');
+  badge.className = 'mqtt-badge';   // reset
+  if (state === 'connected') {
+    badge.id = 'mqtt-badge'; badge.classList.add('connected');
+    badgeTxt.textContent = 'MQTT OK';
+  } else if (state === 'error') {
+    badge.id = 'mqtt-badge'; badge.classList.add('error');
+    badgeTxt.textContent = 'MQTT ERR';
+  } else {
+    badge.id = 'mqtt-badge';
+    badgeTxt.textContent = 'CONNECTING';
+  }
+}
+
+// ══════════════════════════════════════════
+//  UPDATE UI
+// ══════════════════════════════════════════
+function flashEl(id) {
+  const el = document.getElementById(id); if (!el) return;
+  el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+}
+
+function setBadge(id, val) {
+  const el = document.getElementById(id); if (!el) return;
+  if      (val >= 5 && val <= 25) { el.className='badge badge-ok';    el.textContent='OK'; }
+  else if (val < 5)               { el.className='badge badge-alarm'; el.textContent='LOW'; }
+  else                            { el.className='badge badge-warn';  el.textContent='HIGH'; }
+}
+
+function updateDashboard(d) {
+  lastData = d;
+  const map = {
+    'val-pd':      d.PD       != null ? (+d.PD).toFixed(2)       : null,
+    'val-ps':      d.PS       != null ? (+d.PS).toFixed(2)       : null,
+    'val-td':      d.TD       != null ? (+d.TD).toFixed(1)       : null,
+    'val-ts':      d.TS       != null ? (+d.TS).toFixed(1)       : null,
+    'val-ttop':    d.TTop     != null ? (+d.TTop).toFixed(1)     : null,
+    'val-tcond':   d.TCondout != null ? (+d.TCondout).toFixed(1) : null,
+    'val-dsh':     d.DSH      != null ? (+d.DSH).toFixed(1)      : null,
+    'val-ssh':     d.SSH      != null ? (+d.SSH).toFixed(1)      : null,
+    'val-sub':     d.Subcool  != null ? (+d.Subcool).toFixed(1)  : null,
+    'val-refname': d.RefName  ?? null,
+    'val-ctr':     d.CTR      != null ? (+d.CTR).toFixed(1)      : null,
+    'val-etr':     d.ETR      != null ? (+d.ETR).toFixed(1)      : null,
+    'val-rssi':    d.RSSI     ?? null,
+  };
+
+  for (const [id, val] of Object.entries(map)) {
+    const el = document.getElementById(id);
+    const v  = val ?? '--';
+    if (el && el.textContent !== String(v)) { el.textContent = v; flashEl(id); }
+  }
+
+  if (d.DSH != null) setBadge('badge-dsh', +d.DSH);
+  if (d.SSH != null) setBadge('badge-ssh', +d.SSH);
+
+  updateWifiBars(d.RSSI);
+  document.getElementById('status-dot').classList.add('online');
+  document.getElementById('status-text').textContent = 'ONLINE';
+  document.getElementById('last-update').textContent =
+    new Date().toLocaleTimeString('th-TH', {hour12:false});
+
+  const t = new Date().toLocaleTimeString('th-TH', {hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  pushChart(t, d.PD, d.PS, d.TD, d.TS, d.TTop, d.TCondout, d.DSH, d.SSH, d.Subcool);
+}
+
+function updateWifiBars(rssi) {
+  let a = 0;
+  if      (rssi >= -50) a = 4;
+  else if (rssi >= -65) a = 3;
+  else if (rssi >= -75) a = 2;
+  else if (rssi >= -85) a = 1;
+  ['b1','b2','b3','b4'].forEach((id,i) =>
+    document.getElementById(id).style.background = i < a ? 'var(--green)' : 'var(--muted)');
+}
+
+// เปลี่ยนสารทำความเย็น → ส่ง MQTT
+function selectRef(btn) {
+  document.querySelectorAll('.ref-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const idx = btn.dataset.ref;
+  if (mqttClient && mqttClient.connected) {
+    mqttClient.publish(TOPIC_CMD_REF, String(idx), { qos:1, retain:true });
+    console.log('Published refrigerant index:', idx);
+  } else {
+    console.warn('MQTT not connected — cannot send command');
+  }
+}
+
+// ══════════════════════════════════════════
+//  CHARTS
+// ══════════════════════════════════════════
+function initCharts() {
+  const baseOpts = {
+    responsive:true, maintainAspectRatio:false, animation:{duration:400},
+    plugins:{ legend:{ labels:{ color:'#6a8aaa', font:{family:'Share Tech Mono',size:10}, boxWidth:12 } } },
+    scales:{
+      x:{ ticks:{color:'#344860', font:{family:'Share Tech Mono',size:9}, maxTicksLimit:6}, grid:{color:'rgba(26,40,64,0.8)'} },
+      y:{ ticks:{color:'#344860', font:{family:'Share Tech Mono',size:9}}, grid:{color:'rgba(26,40,64,0.8)'} }
+    }
+  };
+
+  pressureChart = new Chart(document.getElementById('chart-pressure'), {
+    type:'line',
+    data:{ labels:chartLabels, datasets:[
+      {label:'PD (MPa)', data:pdData, borderColor:'#00d4ff', backgroundColor:'rgba(0,212,255,0.05)', tension:.4, pointRadius:1.5, borderWidth:1.5},
+      {label:'PS (MPa)', data:psData, borderColor:'#00e89a', backgroundColor:'rgba(0,232,154,0.05)', tension:.4, pointRadius:1.5, borderWidth:1.5},
+    ]}, options: JSON.parse(JSON.stringify(baseOpts))
+  });
+
+  tempChart = new Chart(document.getElementById('chart-temp'), {
+    type:'line',
+    data:{ labels:chartLabels, datasets:[
+      {label:'TD (°C)',   data:tdData,   borderColor:'#f5c400', backgroundColor:'rgba(245,196,0,0.05)',  tension:.4, pointRadius:1.5, borderWidth:1.5},
+      {label:'TS (°C)',   data:tsData,   borderColor:'#ff7a00', backgroundColor:'rgba(255,122,0,0.05)',  tension:.4, pointRadius:1.5, borderWidth:1.5},
+      {label:'TTop (°C)',data:ttopData, borderColor:'#ff3860', backgroundColor:'rgba(255,56,96,0.05)',   tension:.4, pointRadius:1.5, borderWidth:1.5, borderDash:[5,3]},
+      {label:'TCond (°C)',data:tcondData,borderColor:'#00e89a', backgroundColor:'rgba(0,232,154,0.05)', tension:.4, pointRadius:1.5, borderWidth:1.5, borderDash:[5,3]},
+    ]}, options: JSON.parse(JSON.stringify(baseOpts))
+  });
+
+  superheatChart = new Chart(document.getElementById('chart-superheat'), {
+    type:'line',
+    data:{ labels:chartLabels, datasets:[
+      {label:'DSH (K)',     data:dshData, borderColor:'#f5c400', backgroundColor:'rgba(245,196,0,0.05)',  tension:.4, pointRadius:1.5, borderWidth:1.5},
+      {label:'SSH (K)',     data:sshData, borderColor:'#ff7a00', backgroundColor:'rgba(255,122,0,0.05)',  tension:.4, pointRadius:1.5, borderWidth:1.5},
+      {label:'Subcool (K)',data:subData, borderColor:'#00d4ff', backgroundColor:'rgba(0,212,255,0.05)',  tension:.4, pointRadius:1.5, borderWidth:1.5},
+    ]}, options: JSON.parse(JSON.stringify(baseOpts))
+  });
+
+  satTempChart = new Chart(document.getElementById('chart-sattemp'), {
+    type:'line',
+    data:{ labels:chartLabels, datasets:[
+      {label:'CTR — Sat.High (°C)', data:ctrData, borderColor:'#00d4ff', backgroundColor:'rgba(0,212,255,0.06)', tension:.4, pointRadius:1.5, borderWidth:1.5},
+      {label:'ETR — Sat.Low  (°C)', data:etrData, borderColor:'#00e89a', backgroundColor:'rgba(0,232,154,0.06)', tension:.4, pointRadius:1.5, borderWidth:1.5, borderDash:[5,3]},
+    ]}, options: JSON.parse(JSON.stringify(baseOpts))
+  });
+}
+
+function pushChart(label, pd, ps, td, ts, ttop, tcond, dsh, ssh, sub) {
+  const maxPts = Math.max(...Object.values(chartPts));
+  while (chartLabels.length >= maxPts) {
+    chartLabels.shift();
+    pdData.shift(); psData.shift();
+    tdData.shift(); tsData.shift(); ttopData.shift(); tcondData.shift();
+    dshData.shift(); sshData.shift(); subData.shift();
+    ctrData.shift(); etrData.shift();
+  }
+  chartLabels.push(label);
+  pdData.push(pd ?? null);    psData.push(ps ?? null);
+  tdData.push(td ?? null);    tsData.push(ts ?? null);
+  ttopData.push(ttop  != null ? +ttop  : null);
+  tcondData.push(tcond != null ? +tcond : null);
+  dshData.push(dsh != null ? +dsh : null);
+  sshData.push(ssh != null ? +ssh : null);
+  subData.push(sub != null ? +sub : null);
+  ctrData.push(lastData?.CTR != null ? +lastData.CTR : null);
+  etrData.push(lastData?.ETR != null ? +lastData.ETR : null);
+
+  pressureChart?.update();
+  tempChart?.update();
+  superheatChart?.update();
+  satTempChart?.update();
+}
+
+// ── Chart Controls ──
+const chartMap = {
+  pressure:  () => pressureChart,
+  temp:      () => tempChart,
+  superheat: () => superheatChart,
+  sattemp:   () => satTempChart,
+};
+
+function setPoints(name, val) {
+  chartPts[name] = parseInt(val);
+  const maxPts = Math.max(...Object.values(chartPts));
+  while (chartLabels.length > maxPts) {
+    chartLabels.shift();
+    pdData.shift(); psData.shift(); tdData.shift(); tsData.shift();
+    ttopData.shift(); tcondData.shift();
+    dshData.shift(); sshData.shift(); subData.shift();
+    ctrData.shift(); etrData.shift();
+  }
+  pressureChart?.update(); tempChart?.update(); superheatChart?.update(); satTempChart?.update();
+}
+
+function setYMode(name, mode, btn) {
+  btn.closest('.ctrl-group').querySelectorAll('.ctrl-mode-btn')
+    .forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const rangeEl = document.getElementById('range-' + name);
+  const ch = chartMap[name]();
+  if (mode === 'auto') {
+    rangeEl.style.display = 'none';
+    if (!ch) return;
+    ch.options.scales.y.min = undefined;
+    ch.options.scales.y.max = undefined;
+    ch.update();
+  } else {
+    rangeEl.style.display = 'flex';
+  }
+}
+
+function applyRange(name) {
+  const ch = chartMap[name]();
+  if (!ch) return;
+  const ids = {
+    pressure:  ['pres-min','pres-max'],
+    temp:      ['temp-min','temp-max'],
+    superheat: ['sh-min','sh-max'],
+    sattemp:   ['sat-min','sat-max'],
+  };
+  const [minId, maxId] = ids[name];
+  const minVal = parseFloat(document.getElementById(minId).value);
+  const maxVal = parseFloat(document.getElementById(maxId).value);
+  ch.options.scales.y.min = isNaN(minVal) ? undefined : minVal;
+  ch.options.scales.y.max = isNaN(maxVal) ? undefined : maxVal;
+  ch.update();
+}
+</script>
+</body>
+</html>
